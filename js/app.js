@@ -229,7 +229,7 @@ function renderStats(fuelups) {
       const d = new Date(c.date);
       return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
     });
-    const data = consumption.map((c) => parseFloat(c.consumption));
+    const data = consumption.map((c) => Math.round(parseFloat(c.consumption) * 100) / 100);
 
     if (consumptionChart) consumptionChart.destroy();
 
@@ -259,7 +259,13 @@ function renderStats(fuelups) {
         },
         scales: {
           x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor + '33' } },
-          y: { ticks: { color: textColor, callback: (v) => v.toFixed(2) + ' l' }, grid: { color: gridColor + '33' } }
+          y: {
+            ticks: {
+              color: textColor,
+              callback: function(value) { return Number(value).toFixed(2) + ' l'; }
+            },
+            grid: { color: gridColor + '33' }
+          }
         }
       }
     });
@@ -281,7 +287,7 @@ function renderStats(fuelups) {
       const d = new Date(f.date);
       return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
     });
-    const priceData = withPrice.map((f) => f.pricePerLiter);
+    const priceData = withPrice.map((f) => Math.round(f.pricePerLiter * 100) / 100);
 
     if (priceChart) priceChart.destroy();
 
@@ -311,7 +317,13 @@ function renderStats(fuelups) {
         },
         scales: {
           x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor + '33' } },
-          y: { ticks: { color: textColor, callback: (v) => v.toFixed(2) + ' zł' }, grid: { color: gridColor + '33' } }
+          y: {
+            ticks: {
+              color: textColor,
+              callback: function(value) { return Number(value).toFixed(2) + ' zł'; }
+            },
+            grid: { color: gridColor + '33' }
+          }
         }
       }
     });
