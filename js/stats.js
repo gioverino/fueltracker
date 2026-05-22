@@ -52,4 +52,11 @@ function getTotalDistance(fuelups) {
   return sorted[sorted.length - 1].odometer - sorted[0].odometer;
 }
 
-export { calculateConsumption, getAverageConsumption, getTotalSpent, getTotalLiters, getTotalDistance };
+function getCostPerKm(fuelups) {
+  const totalSpent = fuelups.reduce((acc, f) => acc + (f.totalCost || 0), 0);
+  const distance = getTotalDistance(fuelups);
+  if (distance === 0) return null;
+  return (totalSpent / distance).toFixed(2);
+}
+
+export { calculateConsumption, getAverageConsumption, getTotalSpent, getTotalLiters, getTotalDistance, getCostPerKm };

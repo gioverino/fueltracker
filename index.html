@@ -88,6 +88,10 @@
           <div class="label">Śr. spalanie (l/100km)</div>
         </div>
         <div class="stat-card">
+          <div class="value" id="stat-cost-km">—</div>
+          <div class="label">Koszt / km</div>
+        </div>
+        <div class="stat-card">
           <div class="value" id="stat-total">—</div>
           <div class="label">Wydano łącznie</div>
         </div>
@@ -99,12 +103,22 @@
           <div class="value" id="stat-distance">—</div>
           <div class="label">Przejechano</div>
         </div>
+        <div class="stat-card">
+          <div class="value" id="stat-count">—</div>
+          <div class="label">Tankowań</div>
+        </div>
       </div>
 
       <div class="form-section">
-        <h2>Trend spalania</h2>
+        <h2>Spalanie w czasie</h2>
         <canvas id="chart-consumption" height="200"></canvas>
         <p id="chart-empty" class="empty-state" style="display:none; padding: 20px 0;">Potrzeba min. 2 tankowań do wykresu</p>
+      </div>
+
+      <div class="form-section">
+        <h2>Cena paliwa w czasie</h2>
+        <canvas id="chart-price" height="200"></canvas>
+        <p id="chart-price-empty" class="empty-state" style="display:none; padding: 20px 0;">Potrzeba min. 2 tankowań z ceną</p>
       </div>
 
       <div class="form-section">
@@ -132,6 +146,10 @@
     <button class="nav-btn" data-view="view-stats">
       <span class="icon">📊</span>
       <span>Statystyki</span>
+    </button>
+    <button class="nav-btn" id="btn-theme">
+      <span class="icon" id="theme-icon">☀️</span>
+      <span>Motyw</span>
     </button>
   </nav>
 

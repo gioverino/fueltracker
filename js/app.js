@@ -1,5 +1,5 @@
 import { addFuelup, getAllFuelups, deleteFuelup, getDaysSinceLastExport, markExportDone } from './db.js';
-import { calculateConsumption, getAverageConsumption, getTotalSpent, getTotalLiters, getTotalDistance } from './stats.js';
+import { calculateConsumption, getAverageConsumption, getTotalSpent, getTotalLiters, getTotalDistance, getCostPerKm } from './stats.js';
 import { exportData, importData } from './backup.js';
 import { scanImage } from './ocr.js';
 
@@ -15,13 +15,16 @@ const statAvg = document.getElementById('stat-avg');
 const statTotal = document.getElementById('stat-total');
 const statLiters = document.getElementById('stat-liters');
 const statDistance = document.getElementById('stat-distance');
+const statCostKm = document.getElementById('stat-cost-km');
+const statCount = document.getElementById('stat-count');
 
 // Navigation
 navBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
     const target = btn.dataset.view;
+    if (!target) return; // skip non-view buttons (theme toggle)
     views.forEach((v) => v.classList.toggle('active', v.id === target));
-    navBtns.forEach((b) => b.classList.toggle('active', b === btn));
+    navBtns.forEach((b) => b.classList.toggle('active', b.dataset.view ? b === btn : false));
     if (target === 'view-history' || target === 'view-stats') {
       refreshData();
     }
@@ -198,15 +201,19 @@ function renderHistory(fuelups) {
 
 // Render stats
 let consumptionChart = null;
+let priceChart = null;
 
 function renderStats(fuelups) {
   const avg = getAverageConsumption(fuelups);
+  const costKm = getCostPerKm(fuelups);
   statAvg.textContent = avg ? `${avg}` : '—';
+  statCostKm.textContent = costKm ? `${costKm} zł` : '—';
   statTotal.textContent = `${getTotalSpent(fuelups)} zł`;
   statLiters.textContent = `${getTotalLiters(fuelups)} L`;
   statDistance.textContent = `${getTotalDistance(fuelups).toLocaleString()} km`;
+  statCount.textContent = fuelups.length;
 
-  // Chart
+  // Consumption chart
   const consumption = calculateConsumption(fuelups);
   const chartCanvas = document.getElementById('chart-consumption');
   const chartEmpty = document.getElementById('chart-empty');
@@ -214,54 +221,95 @@ function renderStats(fuelups) {
   if (consumption.length < 2) {
     chartCanvas.style.display = 'none';
     chartEmpty.style.display = 'block';
-    return;
-  }
+  } else {
+    chartCanvas.style.display = 'block';
+    chartEmpty.style.display = 'none';
 
-  chartCanvas.style.display = 'block';
-  chartEmpty.style.display = 'none';
+    const labels = consumption.map((c) => {
+      const d = new Date(c.date);
+      return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
+    });
+    const data = consumption.map((c) => parseFloat(c.consumption));
 
-  const labels = consumption.map((c) => {
-    const d = new Date(c.date);
-    return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
-  });
-  const data = consumption.map((c) => parseFloat(c.consumption));
+    if (consumptionChart) consumptionChart.destroy();
 
-  if (consumptionChart) {
-    consumptionChart.destroy();
-  }
+    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+    const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
 
-  consumptionChart = new Chart(chartCanvas, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Spalanie (l/100km)',
-        data,
-        borderColor: '#4ecdc4',
-        backgroundColor: 'rgba(78, 205, 196, 0.1)',
-        fill: true,
-        tension: 0.3,
-        pointBackgroundColor: '#4ecdc4',
-        pointRadius: 4
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: false }
+    consumptionChart = new Chart(chartCanvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Spalanie (l/100km)',
+          data,
+          borderColor: '#4ecdc4',
+          backgroundColor: 'rgba(78, 205, 196, 0.1)',
+          fill: true,
+          tension: 0.3,
+          pointBackgroundColor: '#4ecdc4',
+          pointRadius: 4
+        }]
       },
-      scales: {
-        x: {
-          ticks: { color: '#a8a8b3', font: { size: 10 } },
-          grid: { color: 'rgba(255,255,255,0.05)' }
-        },
-        y: {
-          ticks: { color: '#a8a8b3', callback: (v) => v + ' l' },
-          grid: { color: 'rgba(255,255,255,0.05)' }
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor + '33' } },
+          y: { ticks: { color: textColor, callback: (v) => v + ' l' }, grid: { color: gridColor + '33' } }
         }
       }
-    }
-  });
+    });
+  }
+
+  // Price chart
+  const priceCanvas = document.getElementById('chart-price');
+  const priceEmpty = document.getElementById('chart-price-empty');
+  const withPrice = [...fuelups].filter((f) => f.pricePerLiter).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  if (withPrice.length < 2) {
+    priceCanvas.style.display = 'none';
+    priceEmpty.style.display = 'block';
+  } else {
+    priceCanvas.style.display = 'block';
+    priceEmpty.style.display = 'none';
+
+    const priceLabels = withPrice.map((f) => {
+      const d = new Date(f.date);
+      return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
+    });
+    const priceData = withPrice.map((f) => f.pricePerLiter);
+
+    if (priceChart) priceChart.destroy();
+
+    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+    const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
+
+    priceChart = new Chart(priceCanvas, {
+      type: 'line',
+      data: {
+        labels: priceLabels,
+        datasets: [{
+          label: 'Cena/litr (zł)',
+          data: priceData,
+          borderColor: '#e94560',
+          backgroundColor: 'rgba(233, 69, 96, 0.1)',
+          fill: true,
+          tension: 0.3,
+          pointBackgroundColor: '#e94560',
+          pointRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor + '33' } },
+          y: { ticks: { color: textColor, callback: (v) => v + ' zł' }, grid: { color: gridColor + '33' } }
+        }
+      }
+    });
+  }
 }
 
 // Helpers
@@ -314,7 +362,33 @@ function checkBackupReminder() {
   }
 }
 
+// Theme toggle
+const btnTheme = document.getElementById('btn-theme');
+const themeIcon = document.getElementById('theme-icon');
+
+function loadTheme() {
+  const saved = localStorage.getItem('fuel_tracker_theme') || 'dark';
+  applyTheme(saved);
+}
+
+function applyTheme(theme) {
+  if (theme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    themeIcon.textContent = '🌙';
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+    themeIcon.textContent = '☀️';
+  }
+  localStorage.setItem('fuel_tracker_theme', theme);
+}
+
+btnTheme.addEventListener('click', () => {
+  const current = localStorage.getItem('fuel_tracker_theme') || 'dark';
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+});
+
 // Init
 document.getElementById('input-date').value = new Date().toISOString().split('T')[0];
+loadTheme();
 refreshData();
 checkBackupReminder();
