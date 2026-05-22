@@ -309,14 +309,19 @@ header p {
   margin-bottom: 16px;
 }
 
+.scan-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 .btn-scan {
-  width: 100%;
-  padding: 14px;
+  flex: 1;
+  padding: 14px 10px;
   background: var(--bg-card);
   color: var(--text-primary);
   border: 2px dashed var(--border);
   border-radius: 12px;
-  font-size: 1rem;
+  font-size: 0.9rem;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s;
 }

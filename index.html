@@ -26,10 +26,16 @@
 
         <!-- OCR Scanner -->
         <div class="scan-section">
-          <button type="button" id="btn-scan" class="btn-scan">
-            📷 Skanuj dystrybutor
-          </button>
+          <div class="scan-buttons">
+            <button type="button" id="btn-scan" class="btn-scan">
+              📷 Skanuj dystrybutor
+            </button>
+            <button type="button" id="btn-scan-receipt" class="btn-scan">
+              🧾 Skanuj paragon
+            </button>
+          </div>
           <input type="file" id="scan-input" accept="image/*" capture="environment" hidden>
+          <input type="file" id="scan-input-receipt" accept="image/*" capture="environment" hidden>
           <div id="scan-status" class="scan-status" style="display:none">
             <div class="scan-progress">
               <div id="scan-progress-bar" class="scan-progress-bar"></div>

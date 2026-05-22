@@ -55,9 +55,56 @@ form.addEventListener('submit', async (e) => {
 
   await addFuelup(entry);
   form.reset();
+  clearFormDraft();
   document.getElementById('input-date').value = new Date().toISOString().split('T')[0];
   showToast('Tankowanie zapisane ✓');
 });
+
+// --- Form draft auto-save (persist inputs between app suspensions) ---
+const DRAFT_KEY = 'fuel_tracker_form_draft';
+const draftFields = ['input-date', 'input-odometer', 'input-liters', 'input-price', 'input-total'];
+
+function saveFormDraft() {
+  const draft = {};
+  draftFields.forEach((id) => {
+    const val = document.getElementById(id).value;
+    if (val) draft[id] = val;
+  });
+  if (Object.keys(draft).length > 0) {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  }
+}
+
+function restoreFormDraft() {
+  try {
+    const saved = localStorage.getItem(DRAFT_KEY);
+    if (!saved) return;
+    const draft = JSON.parse(saved);
+    draftFields.forEach((id) => {
+      if (draft[id]) {
+        document.getElementById(id).value = draft[id];
+      }
+    });
+  } catch (e) { /* ignore */ }
+}
+
+function clearFormDraft() {
+  localStorage.removeItem(DRAFT_KEY);
+}
+
+// Save draft on every input change
+draftFields.forEach((id) => {
+  document.getElementById(id).addEventListener('input', saveFormDraft);
+});
+
+// Also save before page unload (iOS background kill)
+window.addEventListener('beforeunload', saveFormDraft);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveFormDraft();
+});
+
+// Restore draft on load
+restoreFormDraft();
 
 // Auto-fill total cost
 document.getElementById('input-liters').addEventListener('input', autoCalcTotal);
@@ -73,7 +120,9 @@ function autoCalcTotal() {
 
 // OCR Scanner
 const btnScan = document.getElementById('btn-scan');
+const btnScanReceipt = document.getElementById('btn-scan-receipt');
 const scanInput = document.getElementById('scan-input');
+const scanInputReceipt = document.getElementById('scan-input-receipt');
 const scanStatus = document.getElementById('scan-status');
 const scanProgressBar = document.getElementById('scan-progress-bar');
 const scanStatusText = document.getElementById('scan-status-text');
@@ -85,15 +134,16 @@ btnScan.addEventListener('click', () => {
   scanInput.click();
 });
 
-scanInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+btnScanReceipt.addEventListener('click', () => {
+  scanInputReceipt.click();
+});
 
+async function handleScan(file) {
   // Show preview
   const url = URL.createObjectURL(file);
   scanImg.src = url;
   scanPreview.style.display = 'block';
-  btnScan.style.display = 'none';
+  document.querySelector('.scan-buttons').style.display = 'none';
 
   // Show progress
   scanStatus.style.display = 'block';
@@ -120,7 +170,8 @@ scanInput.addEventListener('change', async (e) => {
       document.getElementById('input-total').value = result.totalCost;
     }
 
-    // Show confidence indicator
+    saveFormDraft();
+
     showToast(result.confidence === 'high'
       ? 'Odczytano dane ✓ Sprawdź wartości'
       : 'Częściowy odczyt — popraw ręcznie');
@@ -129,14 +180,26 @@ scanInput.addEventListener('change', async (e) => {
     scanStatusText.textContent = 'Błąd skanowania. Wpisz ręcznie.';
     console.error('OCR error:', err);
   }
+}
 
+scanInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  await handleScan(file);
   scanInput.value = '';
+});
+
+scanInputReceipt.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  await handleScan(file);
+  scanInputReceipt.value = '';
 });
 
 btnScanClear.addEventListener('click', () => {
   scanPreview.style.display = 'none';
   scanStatus.style.display = 'none';
-  btnScan.style.display = 'block';
+  document.querySelector('.scan-buttons').style.display = 'flex';
   URL.revokeObjectURL(scanImg.src);
 });
 
