@@ -253,10 +253,13 @@ function renderStats(fuelups) {
       },
       options: {
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ctx.parsed.y.toFixed(2) + ' l/100km' } }
+        },
         scales: {
           x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor + '33' } },
-          y: { ticks: { color: textColor, callback: (v) => v + ' l' }, grid: { color: gridColor + '33' } }
+          y: { ticks: { color: textColor, callback: (v) => v.toFixed(2) + ' l' }, grid: { color: gridColor + '33' } }
         }
       }
     });
@@ -302,10 +305,13 @@ function renderStats(fuelups) {
       },
       options: {
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ctx.parsed.y.toFixed(2) + ' zł/l' } }
+        },
         scales: {
           x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor + '33' } },
-          y: { ticks: { color: textColor, callback: (v) => v + ' zł' }, grid: { color: gridColor + '33' } }
+          y: { ticks: { color: textColor, callback: (v) => v.toFixed(2) + ' zł' }, grid: { color: gridColor + '33' } }
         }
       }
     });
