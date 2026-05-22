@@ -24,6 +24,24 @@
       <form id="fuelup-form" class="form-section">
         <h2>Nowe tankowanie</h2>
 
+        <!-- OCR Scanner -->
+        <div class="scan-section">
+          <button type="button" id="btn-scan" class="btn-scan">
+            📷 Skanuj dystrybutor
+          </button>
+          <input type="file" id="scan-input" accept="image/*" capture="environment" hidden>
+          <div id="scan-status" class="scan-status" style="display:none">
+            <div class="scan-progress">
+              <div id="scan-progress-bar" class="scan-progress-bar"></div>
+            </div>
+            <span id="scan-status-text">Analizuję zdjęcie...</span>
+          </div>
+          <div id="scan-preview" class="scan-preview" style="display:none">
+            <img id="scan-img" alt="Podgląd skanu">
+            <button type="button" id="btn-scan-clear" class="btn-scan-clear">✕</button>
+          </div>
+        </div>
+
         <div class="form-group">
           <label for="input-date">Data</label>
           <input type="date" id="input-date" required>
@@ -84,6 +102,12 @@
       </div>
 
       <div class="form-section">
+        <h2>Trend spalania</h2>
+        <canvas id="chart-consumption" height="200"></canvas>
+        <p id="chart-empty" class="empty-state" style="display:none; padding: 20px 0;">Potrzeba min. 2 tankowań do wykresu</p>
+      </div>
+
+      <div class="form-section">
         <h2>Kopia zapasowa</h2>
         <p class="backup-desc">Eksportuj dane jako plik JSON lub zaimportuj z kopii.</p>
         <div class="backup-buttons">
@@ -114,6 +138,8 @@
   <!-- Toast -->
   <div id="toast" class="toast"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script type="module" src="./js/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {

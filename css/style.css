@@ -292,6 +292,104 @@ header p {
   margin-bottom: 14px;
 }
 
+/* OCR Scanner */
+.scan-section {
+  margin-bottom: 16px;
+}
+
+.btn-scan {
+  width: 100%;
+  padding: 14px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.btn-scan:active {
+  border-color: var(--accent);
+  background: rgba(233, 69, 96, 0.1);
+}
+
+.scan-status {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.scan-progress {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.scan-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.3s;
+}
+
+.scan-status-text {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.scan-preview {
+  margin-top: 10px;
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.scan-preview img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.btn-scan-clear {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.scan-confidence {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.scan-confidence.high {
+  background: rgba(78, 205, 196, 0.15);
+  color: var(--success);
+}
+
+.scan-confidence.medium {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+}
+
+.scan-confidence.low {
+  background: rgba(233, 69, 96, 0.15);
+  color: var(--accent-light);
+}
+
 .backup-buttons {
   display: flex;
   gap: 10px;

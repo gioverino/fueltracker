@@ -1,6 +1,7 @@
 import { addFuelup, getAllFuelups, deleteFuelup, getDaysSinceLastExport, markExportDone } from './db.js';
 import { calculateConsumption, getAverageConsumption, getTotalSpent, getTotalLiters, getTotalDistance } from './stats.js';
 import { exportData, importData } from './backup.js';
+import { scanImage } from './ocr.js';
 
 // DOM elements
 const views = document.querySelectorAll('.view');
@@ -67,6 +68,83 @@ function autoCalcTotal() {
   }
 }
 
+// OCR Scanner
+const btnScan = document.getElementById('btn-scan');
+const scanInput = document.getElementById('scan-input');
+const scanStatus = document.getElementById('scan-status');
+const scanProgressBar = document.getElementById('scan-progress-bar');
+const scanStatusText = document.getElementById('scan-status-text');
+const scanPreview = document.getElementById('scan-preview');
+const scanImg = document.getElementById('scan-img');
+const btnScanClear = document.getElementById('btn-scan-clear');
+
+btnScan.addEventListener('click', () => {
+  scanInput.click();
+});
+
+scanInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // Show preview
+  const url = URL.createObjectURL(file);
+  scanImg.src = url;
+  scanPreview.style.display = 'block';
+  btnScan.style.display = 'none';
+
+  // Show progress
+  scanStatus.style.display = 'block';
+  scanProgressBar.style.width = '10%';
+  scanStatusText.textContent = 'Ładuję silnik OCR...';
+
+  try {
+    const result = await scanImage(file, (progress) => {
+      scanProgressBar.style.width = `${progress}%`;
+      scanStatusText.textContent = `Analizuję... ${progress}%`;
+    });
+
+    scanProgressBar.style.width = '100%';
+    scanStatusText.textContent = getConfidenceText(result.confidence);
+
+    // Fill form with results
+    if (result.liters) {
+      document.getElementById('input-liters').value = result.liters;
+    }
+    if (result.pricePerLiter) {
+      document.getElementById('input-price').value = result.pricePerLiter;
+    }
+    if (result.totalCost) {
+      document.getElementById('input-total').value = result.totalCost;
+    }
+
+    // Show confidence indicator
+    showToast(result.confidence === 'high'
+      ? 'Odczytano dane ✓ Sprawdź wartości'
+      : 'Częściowy odczyt — popraw ręcznie');
+
+  } catch (err) {
+    scanStatusText.textContent = 'Błąd skanowania. Wpisz ręcznie.';
+    console.error('OCR error:', err);
+  }
+
+  scanInput.value = '';
+});
+
+btnScanClear.addEventListener('click', () => {
+  scanPreview.style.display = 'none';
+  scanStatus.style.display = 'none';
+  btnScan.style.display = 'block';
+  URL.revokeObjectURL(scanImg.src);
+});
+
+function getConfidenceText(confidence) {
+  switch (confidence) {
+    case 'high': return '✅ Wysoka pewność odczytu';
+    case 'medium': return '⚠️ Średnia pewność — sprawdź wartości';
+    default: return '❓ Niska pewność — popraw ręcznie';
+  }
+}
+
 // Refresh data
 async function refreshData() {
   const fuelups = await getAllFuelups();
@@ -119,12 +197,71 @@ function renderHistory(fuelups) {
 }
 
 // Render stats
+let consumptionChart = null;
+
 function renderStats(fuelups) {
   const avg = getAverageConsumption(fuelups);
   statAvg.textContent = avg ? `${avg}` : '—';
   statTotal.textContent = `${getTotalSpent(fuelups)} zł`;
   statLiters.textContent = `${getTotalLiters(fuelups)} L`;
   statDistance.textContent = `${getTotalDistance(fuelups).toLocaleString()} km`;
+
+  // Chart
+  const consumption = calculateConsumption(fuelups);
+  const chartCanvas = document.getElementById('chart-consumption');
+  const chartEmpty = document.getElementById('chart-empty');
+
+  if (consumption.length < 2) {
+    chartCanvas.style.display = 'none';
+    chartEmpty.style.display = 'block';
+    return;
+  }
+
+  chartCanvas.style.display = 'block';
+  chartEmpty.style.display = 'none';
+
+  const labels = consumption.map((c) => {
+    const d = new Date(c.date);
+    return d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
+  });
+  const data = consumption.map((c) => parseFloat(c.consumption));
+
+  if (consumptionChart) {
+    consumptionChart.destroy();
+  }
+
+  consumptionChart = new Chart(chartCanvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Spalanie (l/100km)',
+        data,
+        borderColor: '#4ecdc4',
+        backgroundColor: 'rgba(78, 205, 196, 0.1)',
+        fill: true,
+        tension: 0.3,
+        pointBackgroundColor: '#4ecdc4',
+        pointRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#a8a8b3', font: { size: 10 } },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        y: {
+          ticks: { color: '#a8a8b3', callback: (v) => v + ' l' },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        }
+      }
+    }
+  });
 }
 
 // Helpers
