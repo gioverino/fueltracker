@@ -165,7 +165,30 @@ function parseOCRText(text) {
     }
   }
 
+  // Filter out known noise values from fuel pump labels
+  const noiseValues = new Set([
+    5, 5.0, 5.00,       // "min. 5l" label
+    0.01,               // "dokładność 0.01l" label
+    0.1, 0.5, 1.0,     // other measurement labels
+    10, 20, 50, 100,    // round numbers from promo stickers
+    2024, 2025, 2026, 2027, // years from dates on stickers
+    1, 2, 3, 4,         // single digits (usually noise)
+  ]);
+
+  const filtered = numbers.filter((n) => {
+    // Remove exact noise matches
+    if (noiseValues.has(n)) return false;
+    // Remove very small numbers (likely measurement specs)
+    if (n < 0.1) return false;
+    // Remove numbers that look like years (4 digits starting with 20)
+    if (n >= 2000 && n <= 2099) return false;
+    // Remove numbers that look like dates (dd.mm format: 1.01 - 31.12)
+    if (n >= 1.01 && n <= 31.12 && /^\d{1,2}\.\d{2}$/.test(n.toString())) return false;
+    return true;
+  });
+
   console.log('Extracted numbers:', numbers);
+  console.log('After noise filter:', filtered);
 
   // Heuristic classification
   const result = {
@@ -173,22 +196,22 @@ function parseOCRText(text) {
     pricePerLiter: null,
     totalCost: null,
     rawText: text,
-    allNumbers: numbers,
+    allNumbers: filtered,
     confidence: 'low'
   };
 
-  if (numbers.length === 0) return result;
+  if (filtered.length === 0) return result;
 
   // Try to classify numbers by typical ranges
   const candidates = {
     price: [],    // 4.00 - 10.00 (price per liter in PLN)
-    liters: [],   // 5.00 - 80.00 (typical tank fill)
+    liters: [],   // 5.01 - 80.00 (typical tank fill, above min 5l label)
     total: []     // 30.00 - 800.00 (total cost)
   };
 
-  for (const num of numbers) {
+  for (const num of filtered) {
     if (num >= 4.0 && num <= 10.0) candidates.price.push(num);
-    if (num >= 3.0 && num <= 85.0) candidates.liters.push(num);
+    if (num >= 5.01 && num <= 85.0) candidates.liters.push(num);
     if (num >= 20.0 && num <= 900.0) candidates.total.push(num);
   }
 
