@@ -249,33 +249,29 @@ function parseOCRText(text) {
     }
   }
 
-  // --- Strategy 3: Extract numbers from fuel line area and find a*b≈c triplet ---
+  // --- Strategy 3: Extract numbers ONLY from fuel line and find a*b≈c triplet ---
   let numbersToCheck = [];
 
   if (fuelLineIndex >= 0) {
-    // Only use numbers from fuel line and nearby lines (±2)
+    // Strict: only fuel line and immediately next line
     const nearbyText = lines
-      .slice(Math.max(0, fuelLineIndex - 1), Math.min(lines.length, fuelLineIndex + 4))
+      .slice(fuelLineIndex, Math.min(lines.length, fuelLineIndex + 2))
       .join(' ');
     numbersToCheck = extractNumbers(nearbyText);
-  } else {
-    // No fuel line found — use all numbers but be strict
-    numbersToCheck = extractNumbers(normalized);
+    console.log('Fuel line numbers only:', numbersToCheck);
+
+    const bestTriplet = findBestTriplet(numbersToCheck);
+    if (bestTriplet) {
+      return {
+        ...bestTriplet,
+        rawText: text,
+        allNumbers: numbersToCheck,
+        confidence: bestTriplet.confidence
+      };
+    }
   }
 
-  console.log('Numbers to check:', numbersToCheck);
-
-  const bestTriplet = findBestTriplet(numbersToCheck);
-  if (bestTriplet) {
-    return {
-      ...bestTriplet,
-      rawText: text,
-      allNumbers: numbersToCheck,
-      confidence: bestTriplet.confidence
-    };
-  }
-
-  // --- No confident result: return empty ---
+  // --- No confident result: return empty (no guessing!) ---
   console.log('No confident match found. Returning empty.');
   return {
     liters: null,
