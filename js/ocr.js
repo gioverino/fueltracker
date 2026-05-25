@@ -1,6 +1,7 @@
 /**
  * OCR module using Tesseract.js for reading fuel pump displays.
  * Loads Tesseract from CDN on first use (~2MB).
+ * Includes image preprocessing for LCD/LED displays.
  */
 
 let worker = null;
@@ -24,11 +25,99 @@ async function initOCR(onProgress) {
 
   // Optimize for numbers and common fuel pump characters
   await worker.setParameters({
-    tessedit_char_whitelist: '0123456789.,/lLzZłPBONE ',
+    tessedit_char_whitelist: '0123456789., ',
     tessedit_pageseg_mode: '6' // Assume uniform block of text
   });
 
   isInitialized = true;
+}
+
+/**
+ * Preprocess image for better OCR on LCD/LED displays.
+ * Steps:
+ * 1. Convert to grayscale
+ * 2. Increase contrast (stretch histogram)
+ * 3. Apply threshold to get black/white (isolate bright digits)
+ * 4. Invert if needed (ensure dark text on light background)
+ */
+function preprocessImage(imageSource) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // Step 1: Convert to grayscale and find min/max for contrast stretch
+      const gray = new Uint8Array(data.length / 4);
+      let min = 255, max = 0;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const g = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+        gray[i / 4] = g;
+        if (g < min) min = g;
+        if (g > max) max = g;
+      }
+
+      // Step 2: Contrast stretch + threshold
+      const range = max - min || 1;
+      const threshold = min + range * 0.55; // adaptive threshold
+
+      // Count bright vs dark pixels to determine if we need to invert
+      let brightCount = 0;
+      for (let i = 0; i < gray.length; i++) {
+        if (gray[i] > threshold) brightCount++;
+      }
+
+      // If most pixels are dark (LCD display with bright digits), invert
+      const shouldInvert = brightCount < gray.length * 0.4;
+
+      // Step 3: Apply threshold and optional invert
+      for (let i = 0; i < gray.length; i++) {
+        const stretched = ((gray[i] - min) / range) * 255;
+        let val = stretched > (threshold - min) / range * 255 ? 255 : 0;
+
+        if (shouldInvert) val = 255 - val;
+
+        const idx = i * 4;
+        data[idx] = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
+        data[idx + 3] = 255;
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+
+      // Step 4: Scale up small images (helps OCR accuracy)
+      if (canvas.width < 600) {
+        const scale = 2;
+        const scaled = document.createElement('canvas');
+        scaled.width = canvas.width * scale;
+        scaled.height = canvas.height * scale;
+        const sctx = scaled.getContext('2d');
+        sctx.imageSmoothingEnabled = false;
+        sctx.drawImage(canvas, 0, 0, scaled.width, scaled.height);
+        resolve(scaled);
+      } else {
+        resolve(canvas);
+      }
+    };
+
+    // Handle both File and URL sources
+    if (imageSource instanceof File || imageSource instanceof Blob) {
+      img.src = URL.createObjectURL(imageSource);
+    } else {
+      img.src = imageSource;
+    }
+  });
 }
 
 /**
@@ -38,7 +127,10 @@ async function initOCR(onProgress) {
 async function scanImage(imageSource, onProgress) {
   await initOCR(onProgress);
 
-  const { data } = await worker.recognize(imageSource);
+  // Preprocess for LCD/LED display
+  const processed = await preprocessImage(imageSource);
+
+  const { data } = await worker.recognize(processed);
   const text = data.text;
 
   console.log('OCR raw text:', text);
