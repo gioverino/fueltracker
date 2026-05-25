@@ -138,7 +138,7 @@ btnScanReceipt.addEventListener('click', () => {
   scanInputReceipt.click();
 });
 
-async function handleScan(file) {
+async function handleScan(file, mode) {
   // Show preview
   const url = URL.createObjectURL(file);
   scanImg.src = url;
@@ -154,7 +154,7 @@ async function handleScan(file) {
     const result = await scanImage(file, (progress) => {
       scanProgressBar.style.width = `${progress}%`;
       scanStatusText.textContent = `Analizuję... ${progress}%`;
-    });
+    }, mode);
 
     scanProgressBar.style.width = '100%';
     scanStatusText.textContent = getConfidenceText(result.confidence);
@@ -187,14 +187,14 @@ async function handleScan(file) {
 scanInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  await handleScan(file);
+  await handleScan(file, 'display');
   scanInput.value = '';
 });
 
 scanInputReceipt.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  await handleScan(file);
+  await handleScan(file, 'receipt');
   scanInputReceipt.value = '';
 });
 

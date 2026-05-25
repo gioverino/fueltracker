@@ -122,15 +122,23 @@ function preprocessImage(imageSource) {
 
 /**
  * Process an image and extract fuel data.
- * Returns { liters, pricePerLiter, totalCost } with confidence scores.
+ * @param {File|Blob} imageSource - image to scan
+ * @param {Function} onProgress - progress callback
+ * @param {string} mode - 'display' for LCD pump displays, 'receipt' for paper receipts
  */
-async function scanImage(imageSource, onProgress) {
+async function scanImage(imageSource, onProgress, mode = 'receipt') {
   await initOCR(onProgress);
 
-  // Preprocess for LCD/LED display
-  const processed = await preprocessImage(imageSource);
+  let source;
+  if (mode === 'display') {
+    // Preprocess only for LCD/LED displays (high contrast, threshold)
+    source = await preprocessImage(imageSource);
+  } else {
+    // For receipts: no preprocessing — Tesseract handles printed text well
+    source = imageSource;
+  }
 
-  const { data } = await worker.recognize(processed);
+  const { data } = await worker.recognize(source);
   const text = data.text;
 
   console.log('OCR raw text:', text);
