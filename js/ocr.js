@@ -157,7 +157,12 @@ function parseOCRText(text) {
   console.log('OCR raw text:', text);
 
   // Normalize: replace commas with dots for decimals
-  const normalized = text.replace(/,/g, '.');
+  // Remove trailing tax letters (A, B, C) that get appended to amounts on Polish receipts
+  // e.g., "214.02A" or "214.428" (where 8 is misread A)
+  const normalized = text
+    .replace(/,/g, '.')
+    .replace(/(\d+\.\d{2})[A-Za-z]/g, '$1')  // remove single letter after decimal amount
+    .replace(/(\d+\.\d{2})\d([A-Za-z\s])/g, '$1$2'); // remove extra digit before letter (misread)
 
   // --- Strategy 1: Find fuel line by context keywords ---
   // Split into lines and look for fuel-related keywords
@@ -178,19 +183,21 @@ function parseOCRText(text) {
   console.log('Fuel line found:', fuelLine);
 
   // --- Strategy 2: Look for multiplication pattern near fuel line ---
-  // Check fuel line and adjacent lines for pattern: number * number or number x number
+  // Check fuel line and adjacent lines for patterns:
+  // - explicit: 33.13 * 6.46 or 33.13 x 6.46
+  // - merged: 33.136.46 (two decimals merged without separator)
   const searchLines = [];
   if (fuelLineIndex >= 0) {
-    // Look at fuel line and up to 2 lines below (multiplication often on next line)
     for (let i = fuelLineIndex; i < Math.min(fuelLineIndex + 3, lines.length); i++) {
       searchLines.push(lines[i]);
     }
   } else {
-    // No fuel keyword found — search all lines
     searchLines.push(...lines);
   }
 
   const searchText = searchLines.join(' ');
+
+  // Pattern A: explicit multiplication sign
   const multiplyPattern = /(\d+\.?\d*)\s*[x×\*]\s*(\d+\.?\d*)/gi;
   let multiplyMatch = multiplyPattern.exec(searchText);
 
@@ -199,40 +206,46 @@ function parseOCRText(text) {
     const b = parseFloat(multiplyMatch[2]);
 
     if (a > 0 && b > 0) {
-      let liters, pricePerLiter;
-
-      // Determine roles: price is 4-10 range, liters is larger
-      if (a >= 4.0 && a <= 10.0 && b > 10) {
-        pricePerLiter = a;
-        liters = b;
-      } else if (b >= 4.0 && b <= 10.0 && a > 10) {
-        liters = a;
-        pricePerLiter = b;
-      } else if (b >= 4.0 && b <= 10.0) {
-        pricePerLiter = b;
-        liters = a;
-      } else if (a >= 4.0 && a <= 10.0) {
-        pricePerLiter = a;
-        liters = b;
-      } else if (a > b) {
-        liters = a;
-        pricePerLiter = b;
-      } else {
-        liters = b;
-        pricePerLiter = a;
+      const assigned = assignRoles(a, b);
+      if (assigned) {
+        console.log('Found explicit multiply pattern:', a, 'x', b);
+        return { ...assigned, rawText: text, allNumbers: [a, b, assigned.totalCost], confidence: 'high' };
       }
+    }
+  }
 
-      const totalCost = Math.round(liters * pricePerLiter * 100) / 100;
+  // Pattern B: two decimals merged (e.g., "33.136.46" = 33.13 and 6.46)
+  // Looks for: digits.digits+digits.digits (where the middle part has no space)
+  const mergedPattern = /(\d+\.\d{2})(\d+\.\d{2,3})/g;
+  let mergedMatch = mergedPattern.exec(searchText);
 
-      console.log('Found multiply pattern:', a, 'x', b, '=', totalCost);
-      return {
-        liters,
-        pricePerLiter,
-        totalCost,
-        rawText: text,
-        allNumbers: [a, b, totalCost],
-        confidence: 'high'
-      };
+  if (mergedMatch) {
+    const a = parseFloat(mergedMatch[1]);
+    const b = parseFloat(mergedMatch[2]);
+
+    if (a > 0 && b > 0) {
+      const assigned = assignRoles(a, b);
+      if (assigned) {
+        console.log('Found merged decimal pattern:', a, '&', b);
+        return { ...assigned, rawText: text, allNumbers: [a, b, assigned.totalCost], confidence: 'high' };
+      }
+    }
+  }
+
+  // Pattern C: also try reversed merge (e.g., "6.4633.13")
+  const mergedPattern2 = /(\d+\.\d{2,3})(\d+\.\d{2})/g;
+  let mergedMatch2 = mergedPattern2.exec(searchText);
+
+  if (mergedMatch2 && !mergedMatch) {
+    const a = parseFloat(mergedMatch2[1]);
+    const b = parseFloat(mergedMatch2[2]);
+
+    if (a > 0 && b > 0) {
+      const assigned = assignRoles(a, b);
+      if (assigned) {
+        console.log('Found reversed merged pattern:', a, '&', b);
+        return { ...assigned, rawText: text, allNumbers: [a, b, assigned.totalCost], confidence: 'high' };
+      }
     }
   }
 
@@ -294,6 +307,42 @@ function extractNumbers(text) {
   }
 
   return numbers;
+}
+
+/**
+ * Given two numbers (from multiplication), assign roles (liters vs price)
+ * and calculate total. Returns null if numbers don't make sense.
+ */
+function assignRoles(a, b) {
+  let liters, pricePerLiter;
+
+  if (a >= 4.0 && a <= 10.0 && b > 10) {
+    pricePerLiter = a;
+    liters = b;
+  } else if (b >= 4.0 && b <= 10.0 && a > 10) {
+    liters = a;
+    pricePerLiter = b;
+  } else if (b >= 4.0 && b <= 10.0) {
+    pricePerLiter = b;
+    liters = a;
+  } else if (a >= 4.0 && a <= 10.0) {
+    pricePerLiter = a;
+    liters = b;
+  } else if (a > b) {
+    liters = a;
+    pricePerLiter = b;
+  } else {
+    liters = b;
+    pricePerLiter = a;
+  }
+
+  // Sanity check
+  if (pricePerLiter < 3.5 || pricePerLiter > 12.0) return null;
+  if (liters < 2.0 || liters > 90.0) return null;
+
+  const totalCost = Math.round(liters * pricePerLiter * 100) / 100;
+
+  return { liters, pricePerLiter, totalCost };
 }
 
 /**
