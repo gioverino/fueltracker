@@ -150,10 +150,54 @@ function parseOCRText(text) {
   const normalized = text
     .replace(/,/g, '.')
     .replace(/[oO]/g, '0') // common OCR mistake
-    .replace(/[lI]/g, '1') // common OCR mistake
     .replace(/\s+/g, ' ');
 
-  // Find all numbers with decimals
+  console.log('OCR normalized text:', normalized);
+
+  // --- Strategy 1: Look for multiplication pattern (receipt format) ---
+  // Receipts often show: 33.13 x 6.460 or 33.13 * 6.46 = 214.02
+  const multiplyPattern = /(\d+\.?\d*)\s*[x×\*]\s*(\d+\.?\d*)/gi;
+  let multiplyMatch = multiplyPattern.exec(normalized);
+
+  if (multiplyMatch) {
+    const a = parseFloat(multiplyMatch[1]);
+    const b = parseFloat(multiplyMatch[2]);
+
+    if (a > 0 && b > 0) {
+      // Determine which is liters and which is price
+      let liters, pricePerLiter;
+      if (a >= 4.0 && a <= 10.0 && b > 10) {
+        // a is price, b is liters (price x liters format)
+        pricePerLiter = a;
+        liters = b;
+      } else if (b >= 4.0 && b <= 10.0 && a > 10) {
+        // a is liters, b is price (liters x price format)
+        liters = a;
+        pricePerLiter = b;
+      } else if (a > b) {
+        // Larger number is likely liters
+        liters = a;
+        pricePerLiter = b;
+      } else {
+        liters = b;
+        pricePerLiter = a;
+      }
+
+      const totalCost = Math.round(liters * pricePerLiter * 100) / 100;
+
+      console.log('Found multiply pattern:', a, 'x', b);
+      return {
+        liters,
+        pricePerLiter,
+        totalCost,
+        rawText: text,
+        allNumbers: [a, b, totalCost],
+        confidence: 'high'
+      };
+    }
+  }
+
+  // --- Strategy 2: Find all numbers and use cross-validation ---
   const numbers = [];
   const regex = /(\d+\.?\d*)/g;
   let match;
@@ -171,26 +215,42 @@ function parseOCRText(text) {
     0.01,               // "dokładność 0.01l" label
     0.1, 0.5, 1.0,     // other measurement labels
     10, 20, 50, 100,    // round numbers from promo stickers
-    2024, 2025, 2026, 2027, // years from dates on stickers
     1, 2, 3, 4,         // single digits (usually noise)
   ]);
 
   const filtered = numbers.filter((n) => {
-    // Remove exact noise matches
     if (noiseValues.has(n)) return false;
-    // Remove very small numbers (likely measurement specs)
     if (n < 0.1) return false;
-    // Remove numbers that look like years (4 digits starting with 20)
     if (n >= 2000 && n <= 2099) return false;
-    // Remove numbers that look like dates (dd.mm format: 1.01 - 31.12)
-    if (n >= 1.01 && n <= 31.12 && /^\d{1,2}\.\d{2}$/.test(n.toString())) return false;
     return true;
   });
 
-  console.log('Extracted numbers:', numbers);
+  console.log('All numbers:', numbers);
   console.log('After noise filter:', filtered);
 
-  // Heuristic classification
+  // --- Strategy 3: Try all triplet combinations for a*b≈c ---
+  const bestTriplet = findBestTriplet(filtered);
+  if (bestTriplet) {
+    return {
+      ...bestTriplet,
+      rawText: text,
+      allNumbers: filtered,
+      confidence: bestTriplet.confidence
+    };
+  }
+
+  // --- Strategy 4: Try pair combinations (calculate missing value) ---
+  const bestPair = findBestPair(filtered);
+  if (bestPair) {
+    return {
+      ...bestPair,
+      rawText: text,
+      allNumbers: filtered,
+      confidence: 'medium'
+    };
+  }
+
+  // --- Fallback: Simple range-based heuristic ---
   const result = {
     liters: null,
     pricePerLiter: null,
@@ -202,62 +262,150 @@ function parseOCRText(text) {
 
   if (filtered.length === 0) return result;
 
-  // Try to classify numbers by typical ranges
   const candidates = {
-    price: [],    // 4.00 - 10.00 (price per liter in PLN)
-    liters: [],   // 5.01 - 80.00 (typical tank fill, above min 5l label)
-    total: []     // 30.00 - 800.00 (total cost)
+    price: filtered.filter((n) => n >= 4.0 && n <= 10.0),
+    liters: filtered.filter((n) => n >= 5.01 && n <= 85.0),
+    total: filtered.filter((n) => n >= 20.0 && n <= 900.0)
   };
 
-  for (const num of filtered) {
-    if (num >= 4.0 && num <= 10.0) candidates.price.push(num);
-    if (num >= 5.01 && num <= 85.0) candidates.liters.push(num);
-    if (num >= 20.0 && num <= 900.0) candidates.total.push(num);
-  }
-
-  // Best guesses
-  if (candidates.price.length > 0) {
-    result.pricePerLiter = candidates.price[0];
-  }
-
-  if (candidates.total.length > 0) {
-    // Total is usually the largest number
-    result.totalCost = Math.max(...candidates.total);
-  }
-
+  if (candidates.price.length > 0) result.pricePerLiter = candidates.price[0];
+  if (candidates.total.length > 0) result.totalCost = Math.max(...candidates.total);
   if (candidates.liters.length > 0) {
-    // Liters: if we have price and total, calculate; otherwise pick middle-range number
-    if (result.pricePerLiter && result.totalCost) {
-      const calculated = result.totalCost / result.pricePerLiter;
-      // Find the closest number to calculated value
-      const closest = candidates.liters.reduce((prev, curr) =>
-        Math.abs(curr - calculated) < Math.abs(prev - calculated) ? curr : prev
-      );
-      result.liters = closest;
-      result.confidence = 'high';
-    } else {
-      // Pick a number that's not the same as price or total
-      const filtered = candidates.liters.filter(
-        (n) => n !== result.pricePerLiter && n !== result.totalCost
-      );
-      result.liters = filtered.length > 0 ? filtered[0] : candidates.liters[0];
-    }
-  }
-
-  // Validate: liters * price ≈ total?
-  if (result.liters && result.pricePerLiter && result.totalCost) {
-    const expected = result.liters * result.pricePerLiter;
-    const diff = Math.abs(expected - result.totalCost) / result.totalCost;
-    if (diff < 0.05) {
-      result.confidence = 'high';
-    } else if (diff < 0.15) {
-      result.confidence = 'medium';
-    }
-  } else if (result.liters || result.totalCost) {
-    result.confidence = 'medium';
+    const notUsed = candidates.liters.filter(
+      (n) => n !== result.pricePerLiter && n !== result.totalCost
+    );
+    result.liters = notUsed.length > 0 ? notUsed[0] : candidates.liters[0];
   }
 
   return result;
+}
+
+/**
+ * Try all combinations of 3 numbers to find a*b≈c pattern.
+ * Returns the best match with assigned roles (liters, price, total).
+ */
+function findBestTriplet(numbers) {
+  if (numbers.length < 3) return null;
+
+  let bestMatch = null;
+  let bestError = Infinity;
+
+  for (let i = 0; i < numbers.length; i++) {
+    for (let j = 0; j < numbers.length; j++) {
+      if (j === i) continue;
+      for (let k = 0; k < numbers.length; k++) {
+        if (k === i || k === j) continue;
+
+        const a = numbers[i]; // candidate factor 1
+        const b = numbers[j]; // candidate factor 2
+        const c = numbers[k]; // candidate product
+
+        // Check if a * b ≈ c
+        const product = a * b;
+        if (c === 0) continue;
+        const error = Math.abs(product - c) / c;
+
+        if (error < 0.03 && error < bestError) { // within 3% tolerance
+          // Determine which is price and which is liters
+          let liters, pricePerLiter;
+
+          if (a >= 4.0 && a <= 10.0 && b > 10) {
+            pricePerLiter = a;
+            liters = b;
+          } else if (b >= 4.0 && b <= 10.0 && a > 10) {
+            pricePerLiter = b;
+            liters = a;
+          } else if (a < b) {
+            pricePerLiter = a;
+            liters = b;
+          } else {
+            pricePerLiter = b;
+            liters = a;
+          }
+
+          // Sanity check ranges
+          if (pricePerLiter >= 3.5 && pricePerLiter <= 12.0 &&
+              liters >= 3.0 && liters <= 90.0 &&
+              c >= 15.0 && c <= 1000.0) {
+            bestError = error;
+            bestMatch = {
+              liters,
+              pricePerLiter,
+              totalCost: c,
+              confidence: error < 0.01 ? 'high' : 'medium'
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Try pairs of numbers: if we have two values, calculate the third.
+ * Returns best match where calculated value is sensible.
+ */
+function findBestPair(numbers) {
+  if (numbers.length < 2) return null;
+
+  for (let i = 0; i < numbers.length; i++) {
+    for (let j = i + 1; j < numbers.length; j++) {
+      const a = numbers[i];
+      const b = numbers[j];
+
+      // Case 1: a=total, b=price → liters = a/b
+      if (a >= 20 && a <= 900 && b >= 4.0 && b <= 10.0) {
+        const liters = a / b;
+        if (liters >= 3.0 && liters <= 90.0) {
+          return {
+            liters: Math.round(liters * 100) / 100,
+            pricePerLiter: b,
+            totalCost: a
+          };
+        }
+      }
+
+      // Case 2: b=total, a=price → liters = b/a
+      if (b >= 20 && b <= 900 && a >= 4.0 && a <= 10.0) {
+        const liters = b / a;
+        if (liters >= 3.0 && liters <= 90.0) {
+          return {
+            liters: Math.round(liters * 100) / 100,
+            pricePerLiter: a,
+            totalCost: b
+          };
+        }
+      }
+
+      // Case 3: a=liters, b=price → total = a*b
+      if (a >= 5.0 && a <= 85.0 && b >= 4.0 && b <= 10.0) {
+        const total = a * b;
+        if (total >= 15 && total <= 900) {
+          return {
+            liters: a,
+            pricePerLiter: b,
+            totalCost: Math.round(total * 100) / 100
+          };
+        }
+      }
+
+      // Case 4: b=liters, a=price → total = a*b
+      if (b >= 5.0 && b <= 85.0 && a >= 4.0 && a <= 10.0) {
+        const total = a * b;
+        if (total >= 15 && total <= 900) {
+          return {
+            liters: b,
+            pricePerLiter: a,
+            totalCost: Math.round(total * 100) / 100
+          };
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 export { scanImage, parseOCRText };
