@@ -23,9 +23,9 @@ async function initOCR(onProgress) {
     }
   });
 
-  // Optimize for numbers and common fuel pump characters
+  // Optimize for numbers and fuel receipt characters
   await worker.setParameters({
-    tessedit_char_whitelist: '0123456789., ',
+    tessedit_char_whitelist: '0123456789.,*x×= ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
     tessedit_pageseg_mode: '6' // Assume uniform block of text
   });
 
@@ -146,36 +146,67 @@ async function scanImage(imageSource, onProgress) {
  *   - Total cost: XXX.XX (usually 50-500 range)
  */
 function parseOCRText(text) {
-  // Normalize text: replace commas with dots, clean up
-  const normalized = text
-    .replace(/,/g, '.')
-    .replace(/[oO]/g, '0') // common OCR mistake
-    .replace(/\s+/g, ' ');
+  console.log('OCR raw text:', text);
 
-  console.log('OCR normalized text:', normalized);
+  // Normalize: replace commas with dots for decimals
+  const normalized = text.replace(/,/g, '.');
 
-  // --- Strategy 1: Look for multiplication pattern (receipt format) ---
-  // Receipts often show: 33.13 x 6.460 or 33.13 * 6.46 = 214.02
+  // --- Strategy 1: Find fuel line by context keywords ---
+  // Split into lines and look for fuel-related keywords
+  const lines = normalized.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+  const fuelKeywords = /\b(95|98|ON|Pb|PB|pb|diesel|DIESEL|LPG|lpg|benzyna|BENZYNA|verva|VERVA|efecta|EFECTA|dynamic|DYNAMIC)\b/i;
+
+  let fuelLine = null;
+  let fuelLineIndex = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (fuelKeywords.test(lines[i])) {
+      fuelLine = lines[i];
+      fuelLineIndex = i;
+      break;
+    }
+  }
+
+  console.log('Fuel line found:', fuelLine);
+
+  // --- Strategy 2: Look for multiplication pattern near fuel line ---
+  // Check fuel line and adjacent lines for pattern: number * number or number x number
+  const searchLines = [];
+  if (fuelLineIndex >= 0) {
+    // Look at fuel line and up to 2 lines below (multiplication often on next line)
+    for (let i = fuelLineIndex; i < Math.min(fuelLineIndex + 3, lines.length); i++) {
+      searchLines.push(lines[i]);
+    }
+  } else {
+    // No fuel keyword found — search all lines
+    searchLines.push(...lines);
+  }
+
+  const searchText = searchLines.join(' ');
   const multiplyPattern = /(\d+\.?\d*)\s*[x×\*]\s*(\d+\.?\d*)/gi;
-  let multiplyMatch = multiplyPattern.exec(normalized);
+  let multiplyMatch = multiplyPattern.exec(searchText);
 
   if (multiplyMatch) {
     const a = parseFloat(multiplyMatch[1]);
     const b = parseFloat(multiplyMatch[2]);
 
     if (a > 0 && b > 0) {
-      // Determine which is liters and which is price
       let liters, pricePerLiter;
+
+      // Determine roles: price is 4-10 range, liters is larger
       if (a >= 4.0 && a <= 10.0 && b > 10) {
-        // a is price, b is liters (price x liters format)
         pricePerLiter = a;
         liters = b;
       } else if (b >= 4.0 && b <= 10.0 && a > 10) {
-        // a is liters, b is price (liters x price format)
         liters = a;
         pricePerLiter = b;
+      } else if (b >= 4.0 && b <= 10.0) {
+        pricePerLiter = b;
+        liters = a;
+      } else if (a >= 4.0 && a <= 10.0) {
+        pricePerLiter = a;
+        liters = b;
       } else if (a > b) {
-        // Larger number is likely liters
         liters = a;
         pricePerLiter = b;
       } else {
@@ -185,7 +216,7 @@ function parseOCRText(text) {
 
       const totalCost = Math.round(liters * pricePerLiter * 100) / 100;
 
-      console.log('Found multiply pattern:', a, 'x', b);
+      console.log('Found multiply pattern:', a, 'x', b, '=', totalCost);
       return {
         liters,
         pricePerLiter,
@@ -197,87 +228,64 @@ function parseOCRText(text) {
     }
   }
 
-  // --- Strategy 2: Find all numbers and use cross-validation ---
-  const numbers = [];
-  const regex = /(\d+\.?\d*)/g;
-  let match;
+  // --- Strategy 3: Extract numbers from fuel line area and find a*b≈c triplet ---
+  let numbersToCheck = [];
 
-  while ((match = regex.exec(normalized)) !== null) {
-    const num = parseFloat(match[1]);
-    if (num > 0 && num < 10000) {
-      numbers.push(num);
-    }
+  if (fuelLineIndex >= 0) {
+    // Only use numbers from fuel line and nearby lines (±2)
+    const nearbyText = lines
+      .slice(Math.max(0, fuelLineIndex - 1), Math.min(lines.length, fuelLineIndex + 4))
+      .join(' ');
+    numbersToCheck = extractNumbers(nearbyText);
+  } else {
+    // No fuel line found — use all numbers but be strict
+    numbersToCheck = extractNumbers(normalized);
   }
 
-  // Filter out known noise values from fuel pump labels
-  const noiseValues = new Set([
-    5, 5.0, 5.00,       // "min. 5l" label
-    0.01,               // "dokładność 0.01l" label
-    0.1, 0.5, 1.0,     // other measurement labels
-    10, 20, 50, 100,    // round numbers from promo stickers
-    1, 2, 3, 4,         // single digits (usually noise)
-  ]);
+  console.log('Numbers to check:', numbersToCheck);
 
-  const filtered = numbers.filter((n) => {
-    if (noiseValues.has(n)) return false;
-    if (n < 0.1) return false;
-    if (n >= 2000 && n <= 2099) return false;
-    return true;
-  });
-
-  console.log('All numbers:', numbers);
-  console.log('After noise filter:', filtered);
-
-  // --- Strategy 3: Try all triplet combinations for a*b≈c ---
-  const bestTriplet = findBestTriplet(filtered);
+  const bestTriplet = findBestTriplet(numbersToCheck);
   if (bestTriplet) {
     return {
       ...bestTriplet,
       rawText: text,
-      allNumbers: filtered,
+      allNumbers: numbersToCheck,
       confidence: bestTriplet.confidence
     };
   }
 
-  // --- Strategy 4: Try pair combinations (calculate missing value) ---
-  const bestPair = findBestPair(filtered);
-  if (bestPair) {
-    return {
-      ...bestPair,
-      rawText: text,
-      allNumbers: filtered,
-      confidence: 'medium'
-    };
-  }
-
-  // --- Fallback: Simple range-based heuristic ---
-  const result = {
+  // --- No confident result: return empty ---
+  console.log('No confident match found. Returning empty.');
+  return {
     liters: null,
     pricePerLiter: null,
     totalCost: null,
     rawText: text,
-    allNumbers: filtered,
-    confidence: 'low'
+    allNumbers: numbersToCheck,
+    confidence: 'none'
   };
+}
 
-  if (filtered.length === 0) return result;
+/**
+ * Extract meaningful numbers from text, filtering obvious noise.
+ */
+function extractNumbers(text) {
+  const numbers = [];
+  const regex = /(\d+\.?\d*)/g;
+  let match;
 
-  const candidates = {
-    price: filtered.filter((n) => n >= 4.0 && n <= 10.0),
-    liters: filtered.filter((n) => n >= 5.01 && n <= 85.0),
-    total: filtered.filter((n) => n >= 20.0 && n <= 900.0)
-  };
-
-  if (candidates.price.length > 0) result.pricePerLiter = candidates.price[0];
-  if (candidates.total.length > 0) result.totalCost = Math.max(...candidates.total);
-  if (candidates.liters.length > 0) {
-    const notUsed = candidates.liters.filter(
-      (n) => n !== result.pricePerLiter && n !== result.totalCost
-    );
-    result.liters = notUsed.length > 0 ? notUsed[0] : candidates.liters[0];
+  while ((match = regex.exec(text)) !== null) {
+    const num = parseFloat(match[1]);
+    if (num >= 0.5 && num < 5000) {
+      // Skip years
+      if (num >= 2000 && num <= 2099) continue;
+      // Skip very round numbers that are likely labels
+      if (num === 100 || num === 200 || num === 500 || num === 1000) continue;
+      numbers.push(num);
+    }
   }
 
-  return result;
+  return numbers;
 }
 
 /**
@@ -341,71 +349,6 @@ function findBestTriplet(numbers) {
   }
 
   return bestMatch;
-}
-
-/**
- * Try pairs of numbers: if we have two values, calculate the third.
- * Returns best match where calculated value is sensible.
- */
-function findBestPair(numbers) {
-  if (numbers.length < 2) return null;
-
-  for (let i = 0; i < numbers.length; i++) {
-    for (let j = i + 1; j < numbers.length; j++) {
-      const a = numbers[i];
-      const b = numbers[j];
-
-      // Case 1: a=total, b=price → liters = a/b
-      if (a >= 20 && a <= 900 && b >= 4.0 && b <= 10.0) {
-        const liters = a / b;
-        if (liters >= 3.0 && liters <= 90.0) {
-          return {
-            liters: Math.round(liters * 100) / 100,
-            pricePerLiter: b,
-            totalCost: a
-          };
-        }
-      }
-
-      // Case 2: b=total, a=price → liters = b/a
-      if (b >= 20 && b <= 900 && a >= 4.0 && a <= 10.0) {
-        const liters = b / a;
-        if (liters >= 3.0 && liters <= 90.0) {
-          return {
-            liters: Math.round(liters * 100) / 100,
-            pricePerLiter: a,
-            totalCost: b
-          };
-        }
-      }
-
-      // Case 3: a=liters, b=price → total = a*b
-      if (a >= 5.0 && a <= 85.0 && b >= 4.0 && b <= 10.0) {
-        const total = a * b;
-        if (total >= 15 && total <= 900) {
-          return {
-            liters: a,
-            pricePerLiter: b,
-            totalCost: Math.round(total * 100) / 100
-          };
-        }
-      }
-
-      // Case 4: b=liters, a=price → total = a*b
-      if (b >= 5.0 && b <= 85.0 && a >= 4.0 && a <= 10.0) {
-        const total = a * b;
-        if (total >= 15 && total <= 900) {
-          return {
-            liters: b,
-            pricePerLiter: a,
-            totalCost: Math.round(total * 100) / 100
-          };
-        }
-      }
-    }
-  }
-
-  return null;
 }
 
 export { scanImage, parseOCRText };

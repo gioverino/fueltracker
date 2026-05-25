@@ -159,22 +159,24 @@ async function handleScan(file) {
     scanProgressBar.style.width = '100%';
     scanStatusText.textContent = getConfidenceText(result.confidence);
 
-    // Fill form with results
-    if (result.liters) {
-      document.getElementById('input-liters').value = result.liters;
+    // Only fill form if we have confident results
+    if (result.confidence !== 'none') {
+      if (result.liters) {
+        document.getElementById('input-liters').value = result.liters;
+      }
+      if (result.pricePerLiter) {
+        document.getElementById('input-price').value = result.pricePerLiter;
+      }
+      if (result.totalCost) {
+        document.getElementById('input-total').value = result.totalCost;
+      }
+      saveFormDraft();
+      showToast(result.confidence === 'high'
+        ? 'Odczytano dane ✓ Sprawdź wartości'
+        : 'Częściowy odczyt — sprawdź wartości');
+    } else {
+      showToast('Nie udało się odczytać — wpisz ręcznie');
     }
-    if (result.pricePerLiter) {
-      document.getElementById('input-price').value = result.pricePerLiter;
-    }
-    if (result.totalCost) {
-      document.getElementById('input-total').value = result.totalCost;
-    }
-
-    saveFormDraft();
-
-    showToast(result.confidence === 'high'
-      ? 'Odczytano dane ✓ Sprawdź wartości'
-      : 'Częściowy odczyt — popraw ręcznie');
 
   } catch (err) {
     scanStatusText.textContent = 'Błąd skanowania. Wpisz ręcznie.';
@@ -207,7 +209,8 @@ function getConfidenceText(confidence) {
   switch (confidence) {
     case 'high': return '✅ Wysoka pewność odczytu';
     case 'medium': return '⚠️ Średnia pewność — sprawdź wartości';
-    default: return '❓ Niska pewność — popraw ręcznie';
+    case 'none': return '❌ Nie rozpoznano danych z paliwa';
+    default: return '❌ Nie rozpoznano danych z paliwa';
   }
 }
 
