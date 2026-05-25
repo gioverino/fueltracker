@@ -46,6 +46,10 @@
             <img id="scan-img" alt="Podgląd skanu">
             <button type="button" id="btn-scan-clear" class="btn-scan-clear">✕</button>
           </div>
+          <details id="scan-debug" style="display:none; margin-top:8px;">
+            <summary style="font-size:0.75rem; color:var(--text-secondary); cursor:pointer;">Pokaż surowy tekst OCR</summary>
+            <pre id="scan-raw-text" style="font-size:0.7rem; color:var(--text-secondary); white-space:pre-wrap; word-break:break-all; max-height:200px; overflow:auto; background:var(--bg-primary); padding:8px; border-radius:8px; margin-top:6px;"></pre>
+          </details>
         </div>
 
         <div class="form-group">

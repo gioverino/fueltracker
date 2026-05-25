@@ -159,6 +159,12 @@ async function handleScan(file, mode) {
     scanProgressBar.style.width = '100%';
     scanStatusText.textContent = getConfidenceText(result.confidence);
 
+    // Show debug info
+    const debugEl = document.getElementById('scan-debug');
+    const rawTextEl = document.getElementById('scan-raw-text');
+    debugEl.style.display = 'block';
+    rawTextEl.textContent = result.rawText || '(brak tekstu)';
+
     // Only fill form if we have confident results
     if (result.confidence !== 'none') {
       if (result.liters) {
@@ -202,6 +208,7 @@ btnScanClear.addEventListener('click', () => {
   scanPreview.style.display = 'none';
   scanStatus.style.display = 'none';
   document.querySelector('.scan-buttons').style.display = 'flex';
+  document.getElementById('scan-debug').style.display = 'none';
   URL.revokeObjectURL(scanImg.src);
 });
 
